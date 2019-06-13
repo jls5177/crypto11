@@ -310,7 +310,9 @@ func Configure(config *Config) (*Context, error) {
 		return nil, errors.WithMessagef(err, "failed to create long term session")
 	}
 	err = instance.ctx.Login(instance.persistentSession, pkcs11.CKU_USER, instance.cfg.Pin)
-	if err != nil {
+
+	// the login will fail when using a module slot so only error out when the token requires a login
+	if err != nil && (instance.token.Flags&pkcs11.CKF_LOGIN_REQUIRED) == pkcs11.CKF_LOGIN_REQUIRED {
 		_ = instance.ctx.Finalize()
 		instance.ctx.Destroy()
 		return nil, errors.WithMessagef(err, "failed to log into long term session")
