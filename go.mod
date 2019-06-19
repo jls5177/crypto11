@@ -11,3 +11,5 @@ require (
 	github.com/youtube/vitess v2.1.1+incompatible // indirect
 	golang.org/x/net v0.0.0-20190424112056-4829fb13d2c6 // indirect
 )
+
+replace github.com/miekg/pkcs11 => github.com/jls5177/pkcs11 v0.0.0-20190619075809-6b9a3b8cfb6b
