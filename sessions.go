@@ -86,3 +86,12 @@ func (c *Context) resourcePoolFactoryFunc() (pool.Resource, error) {
 	}
 	return &pkcs11Session{c.ctx, session}, nil
 }
+
+// WithPKCS11Session provides a raw session to the low level PKCS11 library. This can be used to implement features
+// not currently supported by the cryto11 library.
+func (c *Context) WithPKCS11Session(fn func(p *pkcs11.Ctx, h pkcs11.SessionHandle) error) error {
+	err := c.withSession(func(session *pkcs11Session) error {
+		return fn(session.ctx, session.handle)
+	})
+	return err
+}
