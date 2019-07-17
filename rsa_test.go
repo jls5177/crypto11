@@ -140,7 +140,7 @@ func testRsaSigningPKCS1v15(t *testing.T, key crypto.Signer, hashFunction crypto
 	} else {
 		// the standard library does not yet support SHA3 with the RSASSA-PKCS1-v1_5 algorithm so using a custom
 		// verify function that does have support for SHA3
-		err = verifyPKCS1v15(rsaPubkey, hashFunction, plaintextHash, sig)
+		err = VerifyPKCS1v15(rsaPubkey, hashFunction, plaintextHash, sig)
 	}
 	require.NoError(t, err)
 }

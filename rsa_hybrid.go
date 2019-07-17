@@ -249,9 +249,9 @@ func encrypt(c *big.Int, pub *rsa.PublicKey, m *big.Int) *big.Int {
 	return c
 }
 
-// verifyPKCS1v15 verifies the RSA signature matches the given hash using the RSASSA-PKCS1-v1.5 algorithm
+// VerifyPKCS1v15 verifies the RSA signature matches the given hash using the RSASSA-PKCS1-v1.5 algorithm
 // Note: This is needed as the version in the standard library does not contain the SHA3 algorithm ID prefixes
-func verifyPKCS1v15(pub *rsa.PublicKey, hash crypto.Hash, hashed []byte, sig[]byte) error {
+func VerifyPKCS1v15(pub *rsa.PublicKey, hash crypto.Hash, hashed []byte, sig []byte) error {
 	hashLen, prefix, err := pkcs1v15HashInfo(hash, len(hashed))
 	if err != nil {
 		return err
