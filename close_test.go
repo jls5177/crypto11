@@ -24,50 +24,12 @@ package crypto11
 import (
 	"crypto/dsa"
 	"crypto/elliptic"
-	"fmt"
-	"math/rand"
 	"testing"
-	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/stretchr/testify/require"
 )
-
-func TestClose(t *testing.T) {
-	// Verify that close and re-open works.
-
-	ctx, err := ConfigureFromFile("config")
-	require.NoError(t, err)
-
-	const pSize = dsa.L1024N160
-	id := randomBytes()
-	key, err := ctx.GenerateDSAKeyPair(id, dsaSizes[pSize])
-	require.NoError(t, err)
-	require.NotNil(t, key)
-
-	require.NoError(t, ctx.Close())
-
-	for i := 0; i < 5; i++ {
-		ctx, err := ConfigureFromFile("config")
-		require.NoError(t, err)
-
-		key2, err := ctx.FindKeyPair(id, nil)
-		require.NoError(t, err)
-
-		testDsaSigning(t, key2.(*pkcs11PrivateKeyDSA), pSize, fmt.Sprintf("close%d", i))
-		require.NoError(t, ctx.Close())
-	}
-}
-
-// randomBytes returns 32 random bytes.
-func randomBytes() []byte {
-	result := make([]byte, 32)
-	rand.Read(result)
-	return result
-}
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 func TestErrorAfterClosed(t *testing.T) {
 	ctx, err := ConfigureFromFile("config")
@@ -79,35 +41,70 @@ func TestErrorAfterClosed(t *testing.T) {
 	bytes := randomBytes()
 
 	_, err = ctx.FindKey(bytes, nil)
-	require.Equal(t, errClosed, err)
+	assert.Equal(t, errClosed, err)
+
+	_, err = ctx.FindKeys(bytes, nil)
+	assert.Equal(t, errClosed, err)
+
+	_, err = ctx.FindKeysWithAttributes(NewAttributeSet())
+	assert.Equal(t, errClosed, err)
 
 	_, err = ctx.FindKeyPair(bytes, nil)
-	require.Equal(t, errClosed, err)
+	assert.Equal(t, errClosed, err)
+
+	_, err = ctx.FindKeyPairs(bytes, nil)
+	assert.Equal(t, errClosed, err)
+
+	_, err = ctx.FindKeyPairsWithAttributes(NewAttributeSet())
+	assert.Equal(t, errClosed, err)
 
 	_, err = ctx.GenerateSecretKey(bytes, 256, CipherAES)
-	require.Equal(t, errClosed, err)
+	assert.Equal(t, errClosed, err)
 
 	_, err = ctx.GenerateSecretKeyWithLabel(bytes, bytes, 256, CipherAES)
-	require.Equal(t, errClosed, err)
+	assert.Equal(t, errClosed, err)
 
 	_, err = ctx.GenerateRSAKeyPair(bytes, 2048)
-	require.Equal(t, errClosed, err)
+	assert.Equal(t, errClosed, err)
 
 	_, err = ctx.GenerateRSAKeyPairWithLabel(bytes, bytes, 2048)
-	require.Equal(t, errClosed, err)
+	assert.Equal(t, errClosed, err)
 
 	_, err = ctx.GenerateDSAKeyPair(bytes, dsaSizes[dsa.L1024N160])
-	require.Equal(t, errClosed, err)
+	assert.Equal(t, errClosed, err)
 
 	_, err = ctx.GenerateDSAKeyPairWithLabel(bytes, bytes, dsaSizes[dsa.L1024N160])
-	require.Equal(t, errClosed, err)
+	assert.Equal(t, errClosed, err)
 
 	_, err = ctx.GenerateECDSAKeyPair(bytes, elliptic.P224())
-	require.Equal(t, errClosed, err)
+	assert.Equal(t, errClosed, err)
 
 	_, err = ctx.GenerateECDSAKeyPairWithLabel(bytes, bytes, elliptic.P224())
-	require.Equal(t, errClosed, err)
+	assert.Equal(t, errClosed, err)
 
 	_, err = ctx.NewRandomReader()
-	require.Equal(t, errClosed, err)
+	assert.Equal(t, errClosed, err)
+
+	cert := generateRandomCert(t)
+
+	err = ctx.ImportCertificate(bytes, cert)
+	assert.Equal(t, errClosed, err)
+
+	err = ctx.ImportCertificateWithLabel(bytes, bytes, cert)
+	assert.Equal(t, errClosed, err)
+
+	err = ctx.ImportCertificateWithAttributes(NewAttributeSet(), cert)
+	assert.Equal(t, errClosed, err)
+
+	_, err = ctx.GetAttribute(nil, CkaLabel)
+	assert.Equal(t, errClosed, err)
+
+	_, err = ctx.GetAttributes(nil, []AttributeType{CkaLabel})
+	assert.Equal(t, errClosed, err)
+
+	_, err = ctx.GetPubAttribute(nil, CkaLabel)
+	assert.Equal(t, errClosed, err)
+
+	_, err = ctx.GetPubAttributes(nil, []AttributeType{CkaLabel})
+	assert.Equal(t, errClosed, err)
 }

@@ -79,7 +79,7 @@ func (c *Context) GenerateDSAKeyPair(id []byte, params *dsa.Parameters) (Signer,
 		return nil, errClosed
 	}
 
-	public, err := NewAttributeSetWithId(id)
+	public, err := NewAttributeSetWithID(id)
 	if err != nil {
 		return nil, err
 	}
@@ -106,14 +106,16 @@ func (c *Context) GenerateDSAKeyPairWithLabel(id, label []byte, params *dsa.Para
 	return c.GenerateDSAKeyPairWithAttributes(public, private, params)
 }
 
-// GenerateDSAKeyPairWithAttributes creates a DSA key pair on the token. Required Attributes that are missing
-// in the provided "public" and "private" AttributeSets will be set to a default value.
-func (c *Context) GenerateDSAKeyPairWithAttributes(public, private AttributeSet, params *dsa.Parameters) (k Signer, err error) {
+// GenerateDSAKeyPairWithAttributes creates a DSA key pair on the token. After this function returns, public and private
+// will contain the attributes applied to the key pair. If required attributes are missing, they will be set to a
+// default value.
+func (c *Context) GenerateDSAKeyPairWithAttributes(public, private AttributeSet, params *dsa.Parameters) (Signer, error) {
 	if c.closed.Get() {
 		return nil, errClosed
 	}
 
-	err = c.withSession(func(session *pkcs11Session) error {
+	var k Signer
+	err := c.withSession(func(session *pkcs11Session) error {
 		p := params.P.Bytes()
 		q := params.Q.Bytes()
 		g := params.G.Bytes()
@@ -158,7 +160,7 @@ func (c *Context) GenerateDSAKeyPairWithAttributes(public, private AttributeSet,
 		return nil
 
 	})
-	return
+	return k, err
 }
 
 // Sign signs a message using a DSA key.

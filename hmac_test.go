@@ -57,10 +57,13 @@ func TestHmac(t *testing.T) {
 
 func testHmac(t *testing.T, ctx *Context, keytype int, mech int, length int, xlength int, full bool) {
 
+	skipIfMechUnsupported(t, ctx, uint(mech))
+
 	id := randomBytes()
 	key, err := ctx.GenerateSecretKey(id, 256, Ciphers[keytype])
 	require.NoError(t, err)
 	require.NotNil(t, key)
+	defer key.Delete()
 
 	t.Run("Short", func(t *testing.T) {
 		input := []byte("a short string")

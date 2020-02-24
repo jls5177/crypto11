@@ -46,11 +46,15 @@ func TestHardSymmetric(t *testing.T) {
 }
 
 func testHardSymmetric(t *testing.T, ctx *Context, keytype int, bits int) {
+	for _, p := range Ciphers[keytype].GenParams {
+		skipIfMechUnsupported(t, ctx, p.GenMech)
+	}
 
 	id := randomBytes()
 	key, err := ctx.GenerateSecretKey(id, bits, Ciphers[keytype])
 	require.NoError(t, err)
 	require.NotNil(t, key)
+	defer key.Delete()
 
 	var key2 *SecretKey
 	t.Run("Find", func(t *testing.T) {
@@ -58,7 +62,10 @@ func testHardSymmetric(t *testing.T, ctx *Context, keytype int, bits int) {
 		require.NoError(t, err)
 	})
 
-	t.Run("Block", func(t *testing.T) { testSymmetricBlock(t, key, key2) })
+	t.Run("Block", func(t *testing.T) {
+		skipIfMechUnsupported(t, key.context, key.Cipher.ECBMech)
+		testSymmetricBlock(t, key, key2)
+	})
 
 	iv := make([]byte, key.BlockSize())
 	for i := range iv {
@@ -66,11 +73,13 @@ func testHardSymmetric(t *testing.T, ctx *Context, keytype int, bits int) {
 	}
 
 	t.Run("CBC", func(t *testing.T) {
+		// By using cipher.NewCBCEncrypter, this test will actually use ECB mode on the key.
+		skipIfMechUnsupported(t, key2.context, key2.Cipher.ECBMech)
 		testSymmetricMode(t, cipher.NewCBCEncrypter(key2, iv), cipher.NewCBCDecrypter(key2, iv))
 	})
 
 	t.Run("CBCClose", func(t *testing.T) {
-
+		skipIfMechUnsupported(t, key2.context, key2.Cipher.CBCMech)
 		enc, err := key2.NewCBCEncrypterCloser(iv)
 		require.NoError(t, err)
 
@@ -83,6 +92,7 @@ func testHardSymmetric(t *testing.T, ctx *Context, keytype int, bits int) {
 	})
 
 	t.Run("CBCNoClose", func(t *testing.T) {
+		skipIfMechUnsupported(t, key2.context, key2.Cipher.CBCMech)
 		enc, err := key2.NewCBCEncrypter(iv)
 		require.NoError(t, err)
 
@@ -126,6 +136,14 @@ func testHardSymmetric(t *testing.T, ctx *Context, keytype int, bits int) {
 }
 
 func testSymmetricBlock(t *testing.T, encryptKey cipher.Block, decryptKey cipher.Block) {
+	// The functions in cipher.Block have no error returns, so they panic if they encounter
+	// a problem. We catch these panics here, so the test can fail nicely
+	defer func() {
+		if cause := recover(); cause != nil {
+			t.Fatalf("Caught panic: %q", cause)
+		}
+	}()
+
 	b := encryptKey.BlockSize()
 	input := make([]byte, 3*b)
 	middle := make([]byte, 3*b)
@@ -175,6 +193,14 @@ func testSymmetricBlock(t *testing.T, encryptKey cipher.Block, decryptKey cipher
 }
 
 func testSymmetricMode(t *testing.T, encrypt cipher.BlockMode, decrypt cipher.BlockMode) {
+	// The functions in cipher.Block have no error returns, so they panic if they encounter
+	// a problem. We catch these panics here, so the test can fail nicely
+	defer func() {
+		if cause := recover(); cause != nil {
+			t.Fatalf("Caught panic: %q", cause)
+		}
+	}()
+
 	input := make([]byte, 256)
 	middle := make([]byte, 256)
 	output := make([]byte, 256)
@@ -245,6 +271,8 @@ func BenchmarkCBC(b *testing.B) {
 	id := randomBytes()
 	key, err := ctx.GenerateSecretKey(id, 128, Ciphers[pkcs11.CKK_AES])
 	require.NoError(b, err)
+	require.NotNil(b, key)
+	defer key.Delete()
 
 	iv := make([]byte, 16)
 	plaintext := make([]byte, 65536)

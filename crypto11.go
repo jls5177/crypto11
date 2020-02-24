@@ -97,11 +97,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vitessio/vitess/go/sync2"
-
 	"github.com/miekg/pkcs11"
 	"github.com/pkg/errors"
-	"github.com/vitessio/vitess/go/pools"
+	"github.com/thales-e-security/pool"
 )
 
 const (
@@ -164,18 +162,21 @@ func (k *pkcs11PrivateKey) Delete() error {
 // All functions, except Close, are safe to call from multiple goroutines.
 type Context struct {
 	// Atomic fields must be at top (according to the package owners)
-	closed sync2.AtomicBool
+	closed pool.AtomicBool
 
 	ctx *pkcs11.Ctx
 	cfg *Config
 
 	token *pkcs11.TokenInfo
 	slot  uint
-	pool  *pools.ResourcePool
+	pool  *pool.ResourcePool
 
 	// persistentSession is a session held open so we can be confident handles and login status
 	// persist for the duration of this context
 	persistentSession pkcs11.SessionHandle
+
+	// Cache the supported Mechanisms to allow for quick lookups
+	supportedMechs map[uint]*pkcs11.Mechanism
 }
 
 // Signer is a PKCS#11 key that implements crypto.Signer.
@@ -237,10 +238,20 @@ type Config struct {
 	Pin string
 
 	// Maximum number of concurrent sessions to open. If zero, DefaultMaxSessions is used.
+	// Otherwise, the value specified must be at least 2.
 	MaxSessions int
 
 	// Maximum time to wait for a session from the sessions pool. Zero means wait indefinitely.
 	PoolWaitTimeout time.Duration
+
+	// LoginNotSupported should be set to true for tokens that do not support logging in.
+	LoginNotSupported bool
+
+	// UseGCMIVFromHSM should be set to true for tokens such as CloudHSM, which ignore the supplied IV for
+	// GCM mode and generate their own. In this case, the token will write the IV used into the CK_GCM_PARAMS.
+	// If UseGCMIVFromHSM is true, we will copy this IV and overwrite the 'nonce' slice passed to Seal and Open. It
+	// is therefore necessary that the nonce is the correct length (12 bytes for CloudHSM).
+	UseGCMIVFromHSM bool
 }
 
 // refCount counts the number of contexts using a particular P11 library. It must not be read or modified
@@ -269,6 +280,9 @@ func Configure(config *Config) (*Context, error) {
 
 	if config.MaxSessions == 0 {
 		config.MaxSessions = DefaultMaxSessions
+	}
+	if config.MaxSessions == 1 {
+		return nil, errors.New("MaxSessions must be larger than 1")
 	}
 
 	instance := &Context{
@@ -314,10 +328,10 @@ func Configure(config *Config) (*Context, error) {
 	}
 
 	// We will use one session to keep state alive, so the pool gets maxSessions - 1
-	instance.pool = pools.NewResourcePool(instance.resourcePoolFactoryFunc, maxSessions-1, maxSessions-1, 0)
+	instance.pool = pool.NewResourcePool(instance.resourcePoolFactoryFunc, maxSessions-1, maxSessions-1, 0, 0)
 
-	// Create a long-term session and log it in. This session won't be used by callers, instead it is used to keep
-	// a connection alive to the token to ensure object handles and the log in status remain accessible.
+	// Create a long-term session and log it in (if supported). This session won't be used by callers, instead it is
+	// used to keep a connection alive to the token to ensure object handles and the log in status remain accessible.
 	instance.persistentSession, err = instance.ctx.OpenSession(instance.slot, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
 	if err != nil {
 		_ = instance.ctx.Finalize()
@@ -325,18 +339,32 @@ func Configure(config *Config) (*Context, error) {
 		return nil, errors.WithMessagef(err, "failed to create long term session")
 	}
 
-	// Try to log in our persistent session. This may fail with CKR_USER_ALREADY_LOGGED_IN if another instance
-	// already exists.
-	err = instance.ctx.Login(instance.persistentSession, pkcs11.CKU_USER, instance.cfg.Pin)
-	if err != nil {
+	if !config.LoginNotSupported {
+		// Try to log in our persistent session. This may fail with CKR_USER_ALREADY_LOGGED_IN if another instance
+		// already exists.
+		err = instance.ctx.Login(instance.persistentSession, pkcs11.CKU_USER, instance.cfg.Pin)
+		if err != nil {
 
-		pErr, isP11Error := err.(pkcs11.Error)
+			pErr, isP11Error := err.(pkcs11.Error)
 
-		if !isP11Error || pErr != pkcs11.CKR_USER_ALREADY_LOGGED_IN {
-			_ = instance.ctx.Finalize()
-			instance.ctx.Destroy()
-			return nil, errors.WithMessagef(err, "failed to log into long term session")
+			if !isP11Error || pErr != pkcs11.CKR_USER_ALREADY_LOGGED_IN {
+				_ = instance.ctx.Finalize()
+				instance.ctx.Destroy()
+				return nil, errors.WithMessagef(err, "failed to log into long term session")
+			}
 		}
+	}
+
+	// Get the list of supported mechanisms and cache into a map for fast lookups
+	mechs, err := instance.ctx.GetMechanismList(instance.slot)
+	if err != nil {
+		_ = instance.ctx.Finalize()
+		instance.ctx.Destroy()
+		return nil, errors.WithMessagef(err, "failed to read supported mechanisms")
+	}
+	instance.supportedMechs = make(map[uint]*pkcs11.Mechanism, len(mechs))
+	for _, mech := range mechs {
+		instance.supportedMechs[mech.Mechanism] = mech
 	}
 
 	// Increment the reference count

@@ -22,7 +22,6 @@
 package crypto11
 
 import (
-	"crypto/dsa"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -31,43 +30,36 @@ import (
 	"testing"
 	"time"
 
+	"github.com/miekg/pkcs11"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestKeysPersistAcrossContexts(t *testing.T) {
-	ctx, err := configureWithPin(t)
+	// Verify that close and re-open works.
+	ctx, err := ConfigureFromFile("config")
 	require.NoError(t, err)
 
-	defer func() {
-		err = ctx.Close()
-		require.NoError(t, err)
-	}()
-
-	// Generate a key and and close a session
-	const pSize = dsa.L1024N160
 	id := randomBytes()
-	key, err := ctx.GenerateDSAKeyPair(id, dsaSizes[pSize])
-	require.NoError(t, err)
-	require.NotNil(t, key)
+	_, err = ctx.GenerateRSAKeyPair(id, rsaSize)
+	if err != nil {
+		_ = ctx.Close()
+		t.Fatal(err)
+	}
 
-	err = ctx.Close()
-	require.NoError(t, err)
+	require.NoError(t, ctx.Close())
 
-	// Reopen a session and try to find a key.
-	// Valid session must enlist a key.
-	// If login is not performed than it will fail.
-	ctx, err = configureWithPin(t)
+	ctx, err = ConfigureFromFile("config")
 	require.NoError(t, err)
 
 	key2, err := ctx.FindKeyPair(id, nil)
 	require.NoError(t, err)
 
-	testDsaSigning(t, key2.(*pkcs11PrivateKeyDSA), pSize, fmt.Sprintf("close%d", 0))
-
-	err = key2.Delete()
-	require.NoError(t, err)
+	testRsaSigning(t, key2, false)
+	_ = key2.Delete()
+	require.NoError(t, ctx.Close())
 }
 
 func configureWithPin(t *testing.T) (*Context, error) {
@@ -265,4 +257,43 @@ func TestAccessSameLibraryTwice(t *testing.T) {
 
 	err = ctx3.Close()
 	require.NoError(t, err)
+}
+
+func TestNoLogin(t *testing.T) {
+	// To test that no login is respected, we attempt to perform an operation on our
+	// SoftHSM HSM without logging in and check for the error.
+	cfg, err := getConfig("config")
+	require.NoError(t, err)
+	cfg.LoginNotSupported = true
+
+	ctx, err := Configure(cfg)
+	require.NoError(t, err)
+
+	_, err = ctx.GenerateSecretKey(randomBytes(), 256, CipherAES)
+	require.Error(t, err)
+
+	p11Err, ok := err.(pkcs11.Error)
+	require.True(t, ok)
+
+	assert.Equal(t, pkcs11.Error(pkcs11.CKR_USER_NOT_LOGGED_IN), p11Err)
+}
+
+func TestInvalidMaxSessions(t *testing.T) {
+	cfg, err := getConfig("config")
+	require.NoError(t, err)
+
+	cfg.MaxSessions = 1
+	_, err = Configure(cfg)
+	require.Error(t, err)
+}
+
+// randomBytes returns 32 random bytes.
+func randomBytes() []byte {
+	result := make([]byte, 32)
+	rand.Read(result)
+	return result
+}
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
 }
