@@ -339,7 +339,7 @@ func Configure(config *Config) (*Context, error) {
 		return nil, errors.WithMessagef(err, "failed to create long term session")
 	}
 
-	if !config.LoginNotSupported {
+	if !config.LoginNotSupported && ((instance.token.Flags & pkcs11.CKF_LOGIN_REQUIRED) == pkcs11.CKF_LOGIN_REQUIRED) {
 		// Try to log in our persistent session. This may fail with CKR_USER_ALREADY_LOGGED_IN if another instance
 		// already exists.
 		err = instance.ctx.Login(instance.persistentSession, pkcs11.CKU_USER, instance.cfg.Pin)
